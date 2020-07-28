@@ -12,7 +12,7 @@ describe Mare::Compiler::Macros do
       ctx = Mare::Compiler.compile([source], :macros)
 
       func = ctx.namespace.find_func!(ctx, source, "Main", "new")
-      func.params.not_nil!.to_a.should eq [:group, "(",
+      func.params.not_nil!.to_a_to_s.should eq [:group, "(",
         [:group, " ", [:ident, "foo"], [:ident, "String"]],
         [:relate,
           [:group, " ", [:ident, "bar"], [:ident, "SourceCodePosition"]],

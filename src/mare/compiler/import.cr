@@ -39,7 +39,7 @@ class Mare::Compiler::Import
       # Assert that the imported relative path is a string.
       # TODO: remove this? why even allow a non-string here in the topology?
       relative_path = import.ident
-      raise NotImplementedError.new(import.ident.to_a) \
+      raise NotImplementedError.new(import.ident.to_a_to_s) \
         unless relative_path.is_a?(AST::LiteralString)
 
       # Check if we are linking library

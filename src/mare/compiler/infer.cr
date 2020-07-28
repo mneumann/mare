@@ -758,7 +758,7 @@ class Mare::Compiler::Infer < Mare::AST::Visitor
       elsif node.op.value == "->>"
         type_expr(node.rhs, refer, receiver).simplify(ctx).extracted_from(type_expr(node.lhs, refer, receiver))
       else
-        raise NotImplementedError.new(node.to_a.inspect)
+        raise NotImplementedError.new(node.to_a_to_s)
       end
     end
 
@@ -774,13 +774,13 @@ class Mare::Compiler::Infer < Mare::AST::Visitor
       elsif node.style == "(" && node.terms.size == 1
         type_expr(node.terms.first, refer, receiver)
       else
-        raise NotImplementedError.new(node.to_a.inspect)
+        raise NotImplementedError.new(node.to_a_to_s)
       end
     end
 
     # A "(" qualify is used to add type arguments to a type.
     def type_expr(node : AST::Qualify, refer, receiver = nil) : MetaType
-      raise NotImplementedError.new(node.to_a) unless node.group.style == "("
+      raise NotImplementedError.new(node.to_a_to_s) unless node.group.style == "("
 
       target = type_expr(node.term, refer, receiver)
       args = node.group.terms.map do |t|
@@ -801,7 +801,7 @@ class Mare::Compiler::Infer < Mare::AST::Visitor
 
     # All other AST nodes are unsupported as type expressions.
     def type_expr(node : AST::Node, refer, receiver = nil) : MetaType
-      raise NotImplementedError.new(node.to_a)
+      raise NotImplementedError.new(node.to_a_to_s)
     end
 
     # TODO: Can we do this more eagerly? Chicken and egg problem.

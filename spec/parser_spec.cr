@@ -215,7 +215,7 @@ describe Mare::Parser do
 
     ast = Mare::Parser.parse(source)
 
-    ast.to_a.should eq [:doc,
+    ast.to_a_to_s.should eq [:doc,
       [:declare, [[:ident, "actor"], [:ident, "Main"]], [:group, ":"]],
       [:declare, [[:ident, "new"]], [:group, ":",
         [:string, "FOO"],

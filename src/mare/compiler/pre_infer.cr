@@ -345,7 +345,7 @@ module Mare::Compiler::PreInfer
 
           @analysis.redirect(node, local_ident)
         else
-          raise NotImplementedError.new(node.to_a)
+          raise NotImplementedError.new(node.to_a_to_s)
         end
       else raise NotImplementedError.new(node.style)
       end

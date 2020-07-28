@@ -216,7 +216,7 @@ class Mare::Compiler::Sugar < Mare::AST::CopyOnMutateVisitor
             AST::Group.new("(", node.group.terms.dup).from(node.group)
           ).from(node)
         else
-          raise NotImplementedError.new(node.to_a.inspect)
+          raise NotImplementedError.new(node.to_a_to_s)
         end
       end
 

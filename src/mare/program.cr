@@ -94,7 +94,7 @@ class Mare::Program
     end
 
     def inspect(io : IO)
-      io << "#<#{self.class} #{@ident.value} #{@params.try(&.to_a)}: #{@target.try(&.to_a)}>"
+      io << "#<#{self.class} #{@ident.value} #{@params.try(&.to_a_to_s)}: #{@target.try(&.to_a_to_s)}>"
     end
 
     def ==(other)
@@ -306,7 +306,7 @@ class Mare::Program
       case f.body.not_nil!.terms.last.as(AST::Identifier).value
       when "True" then true
       when "False" then false
-      else raise NotImplementedError.new(f.body.not_nil!.to_a)
+      else raise NotImplementedError.new(f.body.not_nil!.to_a_to_s)
       end
     end
 
@@ -401,9 +401,9 @@ class Mare::Program
       io << " fun"
       io << " " << cap.value
       io << " " << ident.value
-      params ? (io << " "; params.not_nil!.to_a.inspect(io)) : (io << " []")
-      ret    ? (io << " "; ret.not_nil!.to_a.inspect(io))    : (io << " _")
-      body   ? (io << ": "; body.not_nil!.to_a.inspect(io))  : (io << " _")
+      params ? (io << " "; io << params.not_nil!.to_a_to_s) : (io << " []")
+      ret    ? (io << " "; io << ret.not_nil!.to_a_to_s)    : (io << " _")
+      body   ? (io << ": "; io << body.not_nil!.to_a_to_s)  : (io << " _")
       io << ">"
     end
 

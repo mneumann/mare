@@ -136,7 +136,7 @@ module Mare::Compiler::Classify
           # of a local assignment with an explicit type. The value isn't used.
           type_expr_visit(ctx, group.terms[1])
         else
-          raise NotImplementedError.new(group.to_a.inspect)
+          raise NotImplementedError.new(group.to_a_to_s)
         end
       end
     end

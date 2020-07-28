@@ -13,7 +13,7 @@ describe Mare::Compiler::Macros do
       ctx = Mare::Compiler.compile([source], :macros)
 
       func = ctx.namespace.find_func!(ctx, source, "Main", "new")
-      func.body.not_nil!.terms.first.to_a.should eq [:group, "(", [:choice,
+      func.body.not_nil!.terms.first.to_a_to_s.should eq [:group, "(", [:choice,
         [
           [:group, "(", [:relate, [:ident, "x"], [:op, "=="], [:integer, 1]]],
           [:group, "(", [:string, "one"]]
@@ -40,7 +40,7 @@ describe Mare::Compiler::Macros do
       ctx = Mare::Compiler.compile([source], :macros)
 
       func = ctx.namespace.find_func!(ctx, source, "Main", "new")
-      func.body.not_nil!.terms.first.to_a.should eq [:group, "(", [:choice,
+      func.body.not_nil!.terms.first.to_a_to_s.should eq [:group, "(", [:choice,
         [
           [:group, "(", [:relate, [:ident, "x"], [:op, "=="], [:integer, 1]]],
           [:group, "(", [:string, "one"]]
@@ -63,7 +63,7 @@ describe Mare::Compiler::Macros do
       ctx = Mare::Compiler.compile([source], :macros)
 
       func = ctx.namespace.find_func!(ctx, source, "Main", "new")
-      func.body.not_nil!.terms.first.to_a.should eq [:group, "(", [:choice,
+      func.body.not_nil!.terms.first.to_a_to_s.should eq [:group, "(", [:choice,
         [
           [:group, "(", [:relate, [:ident, "x"], [:op, "=="], [:integer, 1]]],
           [:group, "(", [:string, "one"]]

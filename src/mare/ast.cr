@@ -3,6 +3,17 @@ require "pegmatite"
 module Mare::AST
   alias A = Nil | Symbol | String | UInt64 | Int64 | Float64 | Array(A)
 
+  def self.a_to_s(arr : Array(A))
+    String.build do |io|
+      case arr
+      when Array(A)
+        io << a_to_s(arr)
+      else
+        io << arr.to_s
+      end
+    end
+  end
+
   class Visitor
     def visit_any?(ctx : Compiler::Context, node : Node)
       true
@@ -45,6 +56,10 @@ module Mare::AST
     def with_pos(pos : Source::Pos)
       @pos = pos
       self
+    end
+
+    def to_a_to_s
+      AST.a_to_s to_a
     end
 
     def from(other : Node)

@@ -17,12 +17,12 @@ module Mare::AST::Extract
         when "("
           {nil, rhs_rhs}
         when "|"
-          raise NotImplementedError.new(rhs_rhs.to_a) \
+          raise NotImplementedError.new(rhs_rhs.to_a_to_s) \
             unless rhs_rhs.terms.size == 2 \
 
           {rhs_rhs.terms[0].as(AST::Group), rhs_rhs.terms[1].as(AST::Group)}
         else
-          raise NotImplementedError.new(rhs_rhs.to_a)
+          raise NotImplementedError.new(rhs_rhs.to_a_to_s)
         end
 
       rhs_lhs = rhs.lhs
@@ -33,10 +33,10 @@ module Mare::AST::Extract
         ident = rhs_lhs.term.as(AST::Identifier)
         {ident, rhs_lhs.group, yield_params, yield_block}
       else
-        raise NotImplementedError.new(rhs_lhs.to_a)
+        raise NotImplementedError.new(rhs_lhs.to_a_to_s)
       end
     else
-      raise NotImplementedError.new(rhs.to_a)
+      raise NotImplementedError.new(rhs.to_a_to_s)
     end
   end
 
@@ -55,7 +55,7 @@ module Mare::AST::Extract
       recurse = param(node.lhs)
       {recurse[0], recurse[1], node.rhs}
     else
-      raise NotImplementedError.new(node.to_a)
+      raise NotImplementedError.new(node.to_a_to_s)
     end
   end
 

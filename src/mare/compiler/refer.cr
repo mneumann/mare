@@ -236,7 +236,7 @@ module Mare::Compiler::Refer
     end
 
     def create_local(node : AST::Node)
-      raise NotImplementedError.new(node.to_a) \
+      raise NotImplementedError.new(node.to_a_to_s) \
         unless node.is_a?(AST::Group) && node.style == " " && node.terms.size == 2
 
       create_local(node.terms[0])
@@ -263,7 +263,7 @@ module Mare::Compiler::Refer
     end
 
     def create_param_local(node : AST::Relate)
-      raise NotImplementedError.new(node.to_a) \
+      raise NotImplementedError.new(node.to_a_to_s) \
         unless node.op.value == "DEFAULTPARAM"
 
       create_param_local(node.lhs)
@@ -272,7 +272,7 @@ module Mare::Compiler::Refer
     end
 
     def create_param_local(node : AST::Qualify)
-      raise NotImplementedError.new(node.to_a) \
+      raise NotImplementedError.new(node.to_a_to_s) \
         unless node.term.is_a?(AST::Identifier) && node.group.style == "("
 
       create_param_local(node.term)
@@ -281,7 +281,7 @@ module Mare::Compiler::Refer
     end
 
     def create_param_local(node : AST::Node)
-      raise NotImplementedError.new(node.to_a) \
+      raise NotImplementedError.new(node.to_a_to_s) \
         unless node.is_a?(AST::Group) && node.style == " " && node.terms.size == 2
 
       ident = node.terms[0].as(AST::Identifier)

@@ -9,7 +9,7 @@ describe Mare::Compiler::Lambda do
     ctx = Mare::Compiler.compile([source], :lambda)
 
     func = ctx.namespace.find_func!(ctx, source, "Example", "thunk")
-    func.body.not_nil!.to_a.should eq [:group, ":",
+    func.body.not_nil!.to_a_to_s.should eq [:group, ":",
       [:relate,
         [:ident, "apple"],
         [:op, "="],
@@ -21,7 +21,7 @@ describe Mare::Compiler::Lambda do
       ctx.program.types.find(&.ident.value.==("Example.thunk.^1")).not_nil!
         .find_func!("call")
     lambda.params.should eq nil
-    lambda.body.not_nil!.to_a.should eq [:group, ":",
+    lambda.body.not_nil!.to_a_to_s.should eq [:group, ":",
       [:relate,
         [:relate, [:ident, "Fruit"], [:op, "."], [:qualify,
           [:ident, "new"], [:group, "(", [:string, "apple"]]
@@ -42,7 +42,7 @@ describe Mare::Compiler::Lambda do
     ctx = Mare::Compiler.compile([source], :lambda)
 
     func = ctx.namespace.find_func!(ctx, source, "Example", "lambdas")
-    func.body.not_nil!.to_a.should eq [:group, ":",
+    func.body.not_nil!.to_a_to_s.should eq [:group, ":",
       [:relate,
         [:ident, "apple"],
         [:op, "="],
@@ -53,11 +53,11 @@ describe Mare::Compiler::Lambda do
     lambda =
       ctx.program.types.find(&.ident.value.==("Example.lambdas.^1")).not_nil!
         .find_func!("call")
-    lambda.params.not_nil!.to_a.should eq [:group, "(",
+    lambda.params.not_nil!.to_a_to_s.should eq [:group, "(",
       [:ident, "1"],
       [:ident, "2"],
     ]
-    lambda.body.not_nil!.to_a.should eq [:group, ":",
+    lambda.body.not_nil!.to_a_to_s.should eq [:group, ":",
       [:relate,
         [:relate, [:ident, "Fruit"], [:op, "."], [:qualify,
           [:ident, "new"], [:group, "(", [:ident, "1"], [:ident, "2"]]
