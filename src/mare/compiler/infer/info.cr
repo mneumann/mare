@@ -405,6 +405,10 @@ class Mare::Compiler::Infer
         ) { |mts| MetaType.new_intersection(mts).strip_ephemeral }
         .not_nil!
       else
+        # pp [:upstreams, @upstreams]
+        # pp [:downstreams, @downstreams]
+        pp [:upstream_span, resolve_upstream_span(ctx, infer)]
+
         # If we get here, we've failed and don't have enough info to continue.
         Error.at self,
           "This #{described_kind} needs an explicit type; it could not be inferred"
@@ -630,7 +634,7 @@ class Mare::Compiler::Infer
     end
 
     def resolve_span!(ctx : Context, infer : AltInfer::Visitor) : AltInfer::Span
-      AltInfer::Span.self_with_reify_cap(ctx, infer)
+      infer.self_with_reify_cap(ctx)
     end
 
     def resolve!(ctx : Context, infer : ForReifiedFunc) : MetaType
@@ -645,7 +649,7 @@ class Mare::Compiler::Infer
     end
 
     def resolve_span!(ctx : Context, infer : AltInfer::Visitor) : AltInfer::Span
-      AltInfer::Span.self_ephemeral_with_cap(ctx, infer, @cap)
+      infer.self_ephemeral_with_cap(ctx, @cap)
     end
 
     def resolve!(ctx : Context, infer : ForReifiedFunc) : MetaType
@@ -861,7 +865,7 @@ class Mare::Compiler::Infer
     end
 
     def resolve_span!(ctx : Context, infer : AltInfer::Visitor) : AltInfer::Span
-      AltInfer::Span.self_with_reify_cap(ctx, infer).transform_mt do |call_mt|
+      infer.self_with_reify_cap(ctx).transform_mt do |call_mt|
         call_defn = call_mt.single!
         call_func = call_defn.defn(ctx).functions.find do |f|
           f.ident.value == @name && f.has_tag?(:field)
@@ -1817,6 +1821,11 @@ class Mare::Compiler::Infer
       infer.resolve(ctx, @lhs).decided_by(@lhs) do |lhs_mt|
         call_defns = lhs_mt.alt_find_callable_func_defns(ctx, infer, @member)
 
+        if call_defns.empty?
+          pp [lhs_mt, @member]
+          raise "HALT"
+        end
+
         call_defns.compact_map do |(call_mti, call_defn, call_func)|
           call_mt = MetaType.new(call_mti) # TODO: remove call_mti?
 
@@ -1885,6 +1894,16 @@ class Mare::Compiler::Infer
             .depends_on_call_ret_span(ctx, call_defn, call_func, call_link)
             .deciding_f_cap(call_mt.cap_only, call_func.has_tag?(:constructor))
             .not_nil!
+
+          if ret_span.any_mt?(&.unsatisfiable?)
+            pp ret_span
+            pp infer.depends_on_call_ret_span(ctx, call_defn, call_func, call_link)
+            pp call_mt
+            pp call_mt.cap_only
+            pp infer.resolve(ctx, @lhs)
+            puts pos.show
+            raise "alto"
+          end
 
           ret_mt = Infer::MetaType.new_union(ret_span.all_terminal_meta_types)
           raise "halto" if ret_mt.unsatisfiable?
@@ -2445,6 +2464,15 @@ class Mare::Compiler::Infer
             .depends_on_call_param_span(ctx, call_defn, call_func, call_link, @index)
             .deciding_f_cap(call_mt.cap_only, call_func.has_tag?(:constructor))
             .not_nil!
+
+          if param_span.any_mt?(&.unsatisfiable?)
+            pp param_span
+            pp infer.depends_on_call_param_span(ctx, call_defn, call_func, call_link, @index)
+            pp call_mt
+            pp call_mt.cap_only
+            puts pos.show
+            raise "alto"
+          end
 
           param_mt = Infer::MetaType.new_union(param_span.all_terminal_meta_types)
           simple_param_span = AltInfer::Span.simple(param_mt)

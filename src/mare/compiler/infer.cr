@@ -582,6 +582,14 @@ class Mare::Compiler::Infer
     def initialize(@ref, parent_rt : ReifiedType | ReifiedTypeAlias? = nil)
       @parent_rt = StructRef(ReifiedType | ReifiedTypeAlias).new(parent_rt) if parent_rt
     end
+
+    def to_s(io : IO)
+      io.print "TypeParam("
+      io.print ref.ident.value
+      io.print " "
+      ref.ident.pos.inspect(io)
+      io.print ")"
+    end
   end
 
   struct ReifiedTypeAlias
