@@ -710,13 +710,13 @@ class Mare::Compiler::TypeCheck
     # but then that changes the parent_rt which needs to be embedded in them.
     def resolve_type_param_parent_links(mt : MetaType) : MetaType
       substitutions = {} of TypeParam => MetaType
-      mt.type_params.each do |type_param|
-        next if type_param.parent_rt
-        next if type_param.ref.parent_link != reified.link
+      # mt.type_params.each do |type_param|
+      #   next if type_param.parent_rt
+      #   next if type_param.ref.parent_link != reified.link
 
-        scoped_type_param = TypeParam.new(type_param.ref, reified)
-        substitutions[type_param] = MetaType.new_type_param(scoped_type_param)
-      end
+      #   scoped_type_param = TypeParam.new(type_param.ref, reified)
+      #   substitutions[type_param] = MetaType.new_type_param(scoped_type_param)
+      # end
 
       mt = mt.substitute_type_params(substitutions) if substitutions.any?
 
@@ -774,6 +774,17 @@ class Mare::Compiler::TypeCheck
 
         ctx.type_check.for_rt!(trait).analysis.subtyping.assert(reified, f.ident.pos)
       end
+    end
+
+    def type_params_and_type_args(ctx)
+      type_params =
+        @reified.link.resolve(ctx).params.try(&.terms.map { |type_param|
+          ident = AST::Extract.type_param(type_param).first
+          ref = @refer_type[ident]?
+          Infer::TypeParam.new(ref.as(Refer::TypeParam))
+        }) || [] of Infer::TypeParam
+
+      type_params.zip(@reified.args)
     end
 
     def get_type_param_bound(index : Int32)
@@ -877,10 +888,30 @@ class Mare::Compiler::TypeCheck
       span = @f_analysis.span?(info)
       return MetaType.unconstrained unless span
 
-      filtered_span = span.deciding_f_cap(
-        reified.receiver_cap,
-        func.has_tag?(:constructor)
-      ).try(&.final_mt_simplify(ctx))
+      # Filter the span by deciding the function capability.
+      filtered_span = span
+        .deciding_f_cap(
+          reified.receiver_cap,
+          func.has_tag?(:constructor)
+        )
+
+      # Filter the span by deciding the type parameter capability.
+      if filtered_span && !filtered_span.inner.is_a?(AltInfer::Span::Terminal)
+        filtered_span = @for_rt.type_params_and_type_args(ctx)
+          .reduce(filtered_span) { |filtered_span, (type_param, type_arg)|
+            next unless filtered_span
+
+            puts info.pos.show
+            pp @for_rt.reified
+            pp span
+            pp filtered_span
+            pp [type_param, type_arg]
+
+            filtered_span.deciding_type_param(type_param, type_arg.cap_only)
+          }
+      end
+
+      filtered_span = filtered_span.try(&.final_mt_simplify(ctx))
 
       inner = filtered_span.try(&.inner)
       return inner.meta_type if inner.is_a?(AltInfer::Span::Terminal)

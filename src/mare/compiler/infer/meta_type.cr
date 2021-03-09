@@ -179,6 +179,15 @@ struct Mare::Compiler::Infer::MetaType
     MetaType.new(inner.substitute_type_params(substitutions))
   end
 
+  def substitute_lazy_type_params(substitutions : Hash(TypeParam, MetaType), max_depth : Int)
+    return self if substitutions.empty?
+    MetaType.new(inner.substitute_lazy_type_params(substitutions, max_depth))
+  end
+
+  def gather_lazy_type_params_referenced(ctx : Context, set : Set(TypeParam), max_depth : Int) : Set(TypeParam)
+    inner.gather_lazy_type_params_referenced(ctx, set, max_depth)
+  end
+
   def is_sendable? : Bool
     inner.is_sendable?
   end
@@ -234,6 +243,11 @@ struct Mare::Compiler::Infer::MetaType
 
   def cap_only?
     @inner.is_a?(Capability)
+  end
+
+  def type_param_only?
+    inner = @inner
+    inner.is_a?(Nominal) && inner.defn.is_a?(TypeParam)
   end
 
   def within_constraints?(ctx : Context, types : Iterable(MetaType))

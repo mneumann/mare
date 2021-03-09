@@ -9,10 +9,15 @@ struct Mare::Compiler::Infer::MetaType::Nominal
     defn.is_a?(ReifiedType) && defn.link.ignores_cap?
   end
 
+  def lazy?
+    defn = @defn
+    defn.is_a?(ReifiedTypeAlias) || (defn.is_a?(TypeParam) && defn.lazy?)
+  end
+
   def inspect(io : IO)
     inspect_without_cap(io)
 
-    io << "'any" unless ignores_cap? || defn.is_a?(ReifiedTypeAlias)
+    io << "'any" unless lazy? || ignores_cap?
   end
 
   def inspect_with_cap(io : IO, cap : Capability)
@@ -44,6 +49,7 @@ struct Mare::Compiler::Infer::MetaType::Nominal
       else
         io << defn.ref.ident.value
       end
+      io << "..." if defn.lazy?
     end
   end
 
@@ -256,6 +262,52 @@ struct Mare::Compiler::Infer::MetaType::Nominal
     else
       raise NotImplementedError.new(defn)
     end
+  end
+
+  def substitute_lazy_type_params(substitutions : Hash(TypeParam, MetaType), max_depth : Int)
+    defn = defn()
+    case defn
+    when TypeParam
+      return self unless defn.lazy?
+      substitutions[defn]?.try(&.inner) || self
+    when ReifiedType
+      return self unless max_depth > 0
+
+      args = defn.args.map do |arg|
+        arg.substitute_lazy_type_params(substitutions, max_depth - 1).as(MetaType)
+      end
+
+      Nominal.new(ReifiedType.new(defn.link, args))
+    when ReifiedTypeAlias
+      return self unless max_depth > 0
+
+      args = defn.args.map do |arg|
+        arg.substitute_lazy_type_params(substitutions, max_depth - 1).as(MetaType)
+      end
+
+      Nominal.new(ReifiedTypeAlias.new(defn.link, args))
+    else
+      raise NotImplementedError.new(defn)
+    end
+  end
+
+  def gather_lazy_type_params_referenced(ctx : Context, set : Set(TypeParam), max_depth : Int) : Set(TypeParam)
+    defn = defn()
+    case defn
+    when TypeParam
+      set.add(defn) if defn.lazy?
+    when ReifiedType
+      if max_depth > 0
+        defn.args.each(&.gather_lazy_type_params_referenced(ctx, set, max_depth - 1))
+      end
+    when ReifiedTypeAlias
+      if max_depth > 0
+        defn.args.each(&.gather_lazy_type_params_referenced(ctx, set, max_depth - 1))
+      end
+    else
+      raise NotImplementedError.new(defn)
+    end
+    set
   end
 
   def is_sendable?
