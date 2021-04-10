@@ -14,13 +14,12 @@ module Mare::Compiler::Infer
 
     def self.simple(mt : MetaType); new(Terminal.new(mt)); end
 
-    def self.decision(key : Key, span_map : Hash(MetaType, Span))
-      map = span_map.transform_values(&.inner)
-
-      raise NotImplementedError.new("new decision key conflict") \
-        if map.values.any?(&.has_key?(key))
-
-      new(Decision.build(key, map))
+    def self.for_partial_reify(mts : Array(MetaType))
+      new(ByReifyCap.build(mts.map_with_index { |mt, index|
+        bits = BitArray.new(mts.size)
+        bits[index] = true
+        {bits, Terminal.new(mt).as(Inner)}
+      }))
     end
 
     def self.simple_with_fallback(
@@ -51,10 +50,6 @@ module Mare::Compiler::Infer
       inner.total_error
     end
 
-    def has_key?(key : Key) : Bool
-      inner.has_key?(key)
-    end
-
     # TODO: remove this function?
     def all_terminal_meta_types : Array(MetaType)
       inner.all_terminal_meta_types
@@ -77,11 +72,7 @@ module Mare::Compiler::Infer
     end
 
     def transform_mt_to_span(&block : MetaType -> Span) : Span
-      Span.new(inner.transform_mt_to_span([] of {Key, MetaType}, &block))
-    end
-
-    def simple_decided_by(key : Key, &block : MetaType -> Enumerable({MetaType, MetaType})) : Span
-      Span.new(inner.simple_decided_by(key, &block))
+      Span.new(inner.transform_mt_to_span(&block))
     end
 
     def combine_mt_to_span(other : Span, &block : (MetaType, MetaType) -> Span) : Span
@@ -119,24 +110,12 @@ module Mare::Compiler::Infer
       end
     end
 
-    def deciding_exact(key : Key, mt : MetaType) : Span?
-      inner.deciding_exact(key, mt)
-      .try { |new_inner| Span.new(new_inner) }
+    def deciding_partial_reify_index(index : Int) : Span
+      Span.new(inner.deciding_partial_reify_index(index))
     end
 
-    def deciding_f_cap(f_cap_mt : MetaType, is_constructor : Bool) : Span?
-      inner.deciding_f_cap(f_cap_mt, is_constructor)
-      .try { |new_inner| Span.new(new_inner) }
-    end
-
-    def deciding_type_param(type_param : TypeParam, cap : MetaType) : Span?
-      inner.deciding_type_param(type_param, cap)
-      .try { |new_inner| Span.new(new_inner) }
-    end
-
-    def narrowing_type_param(type_param : TypeParam, cap : MetaType) : Span?
-      inner.narrowing_type_param(type_param, cap)
-      .try { |new_inner| Span.new(new_inner) }
+    def narrowing_partial_reify_indices(target_bits : BitArray) : Span
+      Span.new(inner.narrowing_partial_reify_indices(target_bits))
     end
 
     def maybe_fallback_based_on_mt_simplify(options : Array({Symbol, Span}))
@@ -166,20 +145,15 @@ module Mare::Compiler::Infer
     abstract struct Inner
       abstract def any_error? : Bool
       abstract def total_error : Error?
-      abstract def has_key?(key : Key) : Bool
-      abstract def gather_all_keys(set = Set(Key).new) : Set(Key)
       abstract def all_terminal_meta_types : Array(MetaType)
       abstract def any_mt?(&block : MetaType -> Bool) : Bool
       abstract def each_mt(&block : MetaType -> Nil) : Nil
       abstract def transform_mt(&block : MetaType -> MetaType) : Inner
       abstract def transform_mt_using(key : Key, maybe_value : MetaType?, &block : (MetaType, MetaType?) -> MetaType) : Inner
-      abstract def transform_mt_to_span(decided : Array({Key, MetaType}), &block : MetaType -> Span) : Inner
-      abstract def simple_decided_by(key : Key, &block : MetaType -> Enumerable({MetaType, MetaType})) : Inner
+      abstract def transform_mt_to_span(&block : MetaType -> Span) : Inner
       abstract def combine_mt_to_span(other : Inner, maybe_other_terminal : Terminal?, always_yields_terminal = false, &block : (MetaType, MetaType) -> Span) : Inner
-      abstract def deciding_exact(key : Key, mt : MetaType) : Inner?
-      abstract def deciding_f_cap(f_cap_mt : MetaType, is_constructor : Bool) : Inner?
-      abstract def deciding_type_param(type_param : TypeParam, cap : MetaType) : Inner?
-      abstract def narrowing_type_param(type_param : TypeParam, cap : MetaType) : Inner?
+      abstract def deciding_partial_reify_index(index : Int) : Inner
+      abstract def narrowing_partial_reify_indices(target_bits : BitArray) : Inner
       abstract def maybe_fallback_based_on_mt_simplify(options : Array({Symbol, Inner})) : Inner
       abstract def final_mt_simplify(ctx : Context) : Inner
     end
@@ -199,14 +173,6 @@ module Mare::Compiler::Infer
 
       def total_error : Error?
         nil
-      end
-
-      def has_key?(key : Key) : Bool
-        false
-      end
-
-      def gather_all_keys(set = Set(Key).new) : Set(Key)
-        set
       end
 
       def all_terminal_meta_types : Array(MetaType)
@@ -229,17 +195,8 @@ module Mare::Compiler::Infer
         Terminal.new(block.call(meta_type, maybe_value))
       end
 
-      def transform_mt_to_span(decided : Array({Key, MetaType}), &block : MetaType -> Span) : Inner
-        span = block.call(@meta_type)
-        decided.each { |(key, mt)|
-          span = span.deciding_exact(key, mt).not_nil! # TODO: how can we nicely handle this nil case?
-        }
-        span.inner
-      end
-
-      def simple_decided_by(key : Key, &block : MetaType -> Enumerable({MetaType, MetaType})) : Inner
-        map = block.call(meta_type).to_h.transform_values { |mt| Terminal.new(mt).as(Inner) }
-        Decision.build(key, map)
+      def transform_mt_to_span(&block : MetaType -> Span) : Inner
+        block.call(@meta_type).inner
       end
 
       def combine_mt_to_span(other : Inner, maybe_other_terminal : Terminal?, always_yields_terminal = false, &block : (MetaType, MetaType) -> Span) : Inner
@@ -251,20 +208,12 @@ module Mare::Compiler::Infer
         end
       end
 
-      def deciding_exact(key : Key, mt : MetaType) : Inner?
-        self # a terminal node ignores further decisions
+      def deciding_partial_reify_index(index : Int) : Inner
+        self
       end
 
-      def deciding_f_cap(f_cap_mt : MetaType, is_constructor : Bool) : Inner?
-        self # a terminal node ignores further decisions
-      end
-
-      def deciding_type_param(type_param : TypeParam, cap : MetaType) : Inner?
-        self # a terminal node ignores further decisions
-      end
-
-      def narrowing_type_param(type_param : TypeParam, cap : MetaType) : Inner?
-        self # a terminal node ignores further decisions
+      def narrowing_partial_reify_indices(target_bits : BitArray) : Inner
+        self
       end
 
       def maybe_fallback_based_on_mt_simplify(options : Array({Symbol, Inner})) : Inner
@@ -276,248 +225,143 @@ module Mare::Compiler::Infer
       end
     end
 
-    struct Decision < Inner
-      getter key : Key
-      getter map : Hash(MetaType, Inner)
-      def initialize(@key, @map)
-      end
+    struct ByReifyCap < Inner
+      getter mapping : Array({BitArray, (Fallback | Terminal | ErrorPropagate)})
 
-      def self.build(key, map)
-        raise ArgumentError.new("empty decision") if map.empty?
-
-        first_inner = map.values.first
-        return first_inner if map.values.all?(&.==(first_inner))
-
-        new(key, map)
+      def initialize(@mapping)
       end
 
       def pretty_print(format : PrettyPrint)
-        format.group do
-          format.text(key.to_s)
-          format.surround(" : {", " }", left_break: " ", right_break: nil) do
-            @map.each_with_index do |pair, index|
-              value, inner = pair
+        format.group {
+          format.surround("{", " }", left_break: " ", right_break: nil) {
+            @mapping.each_with_index { |pair, index|
+              bits, inner = pair
 
               format.breakable ", " if index != 0
-              format.group do
-                value.inner.pretty_print(format)
-                format.text " => "
-                format.nest do
-                  inner.pretty_print(format)
-                end
-              end
-            end
+
+              bits.pretty_print(format)
+              format.text " => "
+              format.nest {
+                inner.pretty_print(format)
+              }
+            }
+          }
+        }
+      end
+
+      def self.build(mapping : Array({BitArray, Inner}))
+        # Collapse identical inners together by uniting their bit sets.
+        mapping = mapping.group_by(&.last).map { |inner, list|
+          if list.size == 1
+            list.first.not_nil!
+          else
+            bits : BitArray = list.map(&.first)
+              .reduce(nil) { |accum, bits| accum ? (accum | bits) : bits }
+              .not_nil!
+            {bits, inner}
           end
+        }
+
+        case mapping.size
+        when 0; raise NotImplementedError.new("empty ByReifyCap!")
+        when 1; mapping.first.not_nil!.last
+        else new(mapping)
         end
       end
 
       def any_error? : Bool
-        map.values.any?(&.any_error?)
+        @mapping.any?(&.last.any_error?)
       end
 
       def total_error : Error?
-        errors = [] of {Source::Pos, String, Array(Error::Info)}
-
-        key = @key
-        key_pos = key.is_a?(Info) ? key.pos : Source::Pos.none
-        key_describe =
-          case key
-          when Info; "this #{key.describe_kind}"
-          when :f_cap; "the function receiver capability"
-          else raise NotImplementedError.new(key)
-          end
-
-        map.to_a.compact_map do |mt, inner|
-          inner_err = inner.total_error
-          next unless inner_err
-          {"#{key_describe} may have type #{mt.show_type}", inner_err}
-        end.reduce(nil) do |accum, (key_message, inner_err)|
-          if accum
-            Error.new(accum.pos, accum.headline).tap do |total|
-              total.info.concat(accum.info)
-              total.info << {key_pos, key_message}
-              total.info.concat(inner_err.info)
-            end
-          else
-            Error.new(inner_err.pos, inner_err.headline).tap do |total|
-              total.info << {key_pos, key_message}
-              total.info.concat(inner_err.info)
-            end
-          end
-        end
-      end
-
-      def has_key?(key : Key) : Bool
-        @key == key || map.values.any?(&.has_key?(key))
-      end
-
-      def gather_all_keys(set = Set(Key).new) : Set(Key)
-        set.add(@key)
-        map.values.each(&.gather_all_keys(set))
-        set
+        raise NotImplementedError.new("ByReifyCap#total_error")
       end
 
       def all_terminal_meta_types : Array(MetaType)
-        map.values.flat_map(&.all_terminal_meta_types)
+        @mapping.flat_map(&.last.all_terminal_meta_types)
       end
 
       def any_mt?(&block : MetaType -> Bool) : Bool
-        map.values.any?(&.any_mt?(&block))
+        @mapping.any?(&.last.any_mt?(&block))
       end
 
       def each_mt(&block : MetaType -> Nil) : Nil
-        map.values.each(&.each_mt(&block))
+        @mapping.each(&.last.each_mt(&block))
       end
 
       def transform_mt(&block : MetaType -> MetaType) : Inner
-        Decision.build(@key, @map.transform_values(&.transform_mt(&block)))
+        ByReifyCap.build(@mapping.map { |bits, inner| {bits, inner.transform_mt(&block) } })
       end
 
       def transform_mt_using(key : Key, maybe_value : MetaType?, &block : (MetaType, MetaType?) -> MetaType) : Inner
-        Decision.build(@key,
-          if @key == key
-            @map.map do |value, inner|
-              {value, inner.transform_mt_using(key, value, &block)}
-            end.to_h
-          else
-            @map.transform_values(&.transform_mt_using(key, maybe_value, &block))
+        raise NotImplementedError.new("ByReifyCap#transform_mt_using")
+      end
+
+      def transform_mt_to_span(&block : MetaType -> Span) : Inner
+        ByReifyCap.build(@mapping.flat_map { |bits, inner|
+          new_inner = inner.transform_mt_to_span(&block)
+          case new_inner
+          when ErrorPropagate
+            {bits, new_inner}
+          when Terminal
+            {bits, new_inner}
+          when ByReifyCap
+            new_inner.mapping.compact_map { |other_bits, inner_inner|
+              intersection_bits = bits & other_bits
+              {intersection_bits, inner_inner} if intersection_bits.any?
+            }
+          else raise NotImplementedError.new(new_inner.pretty_inspect)
           end
-        )
+        })
       end
 
-      def transform_mt_to_span(decided : Array({Key, MetaType}), &block : MetaType -> Span) : Inner
-        Decision.build(@key, @map.map { |value, inner|
-          {value, inner.transform_mt_to_span(decided + [{key, value}], &block)}
-        }.to_h)
-      end
-
-      def simple_decided_by(key : Key, &block : MetaType -> Enumerable({MetaType, MetaType})) : Inner
-        raise NotImplementedError.new("decision key conflict") if @key == key
-        Decision.build(@key, @map.transform_values(&.simple_decided_by(key, &block)))
-      end
-
+      # TODO: Remove unused parameters from this signature:
       def combine_mt_to_span(other : Inner, maybe_other_terminal : Terminal?, always_yields_terminal = false, &block : (MetaType, MetaType) -> Span) : Inner
-        if maybe_other_terminal
-          Decision.build(@key, @map.transform_values(&.combine_mt_to_span(other, maybe_other_terminal, always_yields_terminal, &block).as(Inner)))
-        else
-          if other.is_a?(Terminal)
-            swap_block = -> (b : MetaType, a : MetaType) { block.call(a, b) }
-            return other.combine_mt_to_span(self, nil, always_yields_terminal, &swap_block)
-          elsif other.is_a?(Decision) && other.key != @key \
-            && @map.values.all?(&.is_a?(Terminal)) \
-            && other.map.values.all?(&.is_a?(Terminal))
-            # This is one easy special case we can handle right now.
-            # We easily handle it because we don't need to do any merging keys.
-            Decision.build(@key, @map.transform_values(&.combine_mt_to_span(other, nil, always_yields_terminal, &block).as(Inner)))
-          elsif other.is_a?(Decision) && other.key == @key \
-            && other.map.keys.all? { |other_value| @map.has_key?(other_value) }
-            # Here's another simple case. We have the same key and a map with
-            # all the same values, so we can trivially merge them pairwise.
-            Decision.build(@key, @map.map { |value, inner|
-              {value, inner.combine_mt_to_span(other.map[value], nil, always_yields_terminal, &block)}
-              .as({MetaType, Inner})
-            }.to_h)
-          elsif @map.all? { |value, inner|
-            inner.is_a?(Decision) && other.is_a?(Decision) \
-            && other.key == inner.key \
-            && other.map.keys.all? { |other_value| inner.map.has_key?(other_value) } \
-            && other.map.values.all? { |other_inner| other_inner.is_a?(Terminal) }
-          }
-            # This is getting a bit ridiculous! We need to write the code that
-            # handles the general case, but this is a special case we handle.
-            Decision.build(@key, @map.transform_values(&.combine_mt_to_span(other, nil, always_yields_terminal, &block).as(Inner)))
-          elsif always_yields_terminal && !(other.gather_all_keys.includes?(@key))
-            # If the other one does not ovelap with our immediate key,
-            # we can descend to the next level and continue.
-            Decision.build(@key, @map.transform_values(&.combine_mt_to_span(other, nil, always_yields_terminal, &block).as(Inner)))
-          elsif other.is_a?(Decision) && \
-            always_yields_terminal && !(gather_all_keys.includes?(other.key))
-            # This is the inverse of the above condition.
-            swap_block = -> (b : MetaType, a : MetaType) { block.call(a, b) }
-            Decision.build(other.key, other.map.transform_values(&.combine_mt_to_span(self, nil, always_yields_terminal, &swap_block).as(Inner)))
+        ByReifyCap.build(@mapping.flat_map { |bits, inner|
+          narrowed_other = if other.is_a?(ByReifyCap)
+            ByReifyCap.build(other.mapping.compact_map { |other_bits, inner_inner|
+              intersection_bits = bits & other_bits
+              {intersection_bits, inner_inner} if intersection_bits.any?
+            })
           else
-            raise NotImplementedError.new("combine_mt_to_span for a decision and another non-terminal")
+            other
           end
-        end
+          {bits, inner.combine_mt_to_span(narrowed_other, maybe_other_terminal,
+            always_yields_terminal, &block).as(Span::Inner)}
+        }.flat_map { |bits, new_inner|
+          case new_inner
+          when ByReifyCap
+            new_inner.mapping.compact_map { |other_bits, inner_inner|
+              intersection_bits = bits & other_bits
+              {intersection_bits, inner_inner} if intersection_bits.any?
+            }
+          else
+            {bits, new_inner.as(Inner)}
+          end
+        })
       end
 
-      def deciding_exact(key : Key, mt : MetaType) : Inner?
-        if @key == key
-          exact_inner = @map[mt]?
-        else
-          Decision.build(@key,
-            @map.transform_values do |inner|
-              new_inner = inner.deciding_exact(key, mt)
-              return nil unless new_inner
-              new_inner
-            end
-          )
-        end
+      def deciding_partial_reify_index(index : Int) : Inner
+        @mapping.find(&.first.[](index)).not_nil!.last
       end
 
-      def deciding_f_cap(f_cap_mt : MetaType, is_constructor : Bool) : Inner?
-        if @key == :f_cap
-          exact_inner = @map[f_cap_mt]?
-          return exact_inner if exact_inner
-
-          @map.find do |value, inner|
-            f_cap_mt.cap_only_inner.subtype_of?(value.not_nil!.cap_only_inner) ||
-            f_cap_mt.inner == MetaType::Capability::ISO || # TODO: better way to handle auto recovery
-            f_cap_mt.inner == MetaType::Capability::TRN || # TODO: better way to handle auto recovery
-            is_constructor # TODO: better way to do this?
-          end.try(&.last)
-        else
-          Decision.build(@key,
-            @map.transform_values do |inner|
-              new_inner = inner.deciding_f_cap(f_cap_mt, is_constructor)
-              return nil unless new_inner
-              new_inner
-            end
-          )
-        end
-      end
-
-      def deciding_type_param(type_param : TypeParam, cap : MetaType) : Inner?
-        key = @key
-        if key.is_a?(TypeParam) && key == type_param
-          @map[cap]?
-        else
-          Decision.build(@key,
-            @map.transform_values do |inner|
-              new_inner = inner.deciding_type_param(type_param, cap)
-              return nil unless new_inner
-              new_inner
-            end
-          )
-        end
-      end
-
-      def narrowing_type_param(type_param : TypeParam, cap : MetaType) : Inner?
-        key = @key
-        if key.is_a?(TypeParam) && key == type_param
-          new_map = @map.select { |value, inner|
-            value.cap_only_inner.satisfies_bound?(cap.cap_only_inner)
-          }.to_h
-          return nil unless new_map
-
-          Decision.build(@key, new_map)
-        else
-          Decision.build(@key,
-            @map.transform_values do |inner|
-              new_inner = inner.narrowing_type_param(type_param, cap)
-              return nil unless new_inner
-              new_inner
-            end
-          )
-        end
+      def narrowing_partial_reify_indices(target_bits : BitArray) : Inner
+        ByReifyCap.build(@mapping.compact_map { |bits, inner|
+          intersection_bits = target_bits & bits
+          {intersection_bits, inner} if intersection_bits.any?
+        })
       end
 
       def maybe_fallback_based_on_mt_simplify(options : Array({Symbol, Inner})) : Inner
-        Decision.build(@key, @map.transform_values(&.maybe_fallback_based_on_mt_simplify(options)))
+        ByReifyCap.build(@mapping.map { |bits, inner|
+          {bits, inner.maybe_fallback_based_on_mt_simplify(options)}
+        })
       end
 
       def final_mt_simplify(ctx : Context) : Inner
-        Decision.build(@key, @map.transform_values(&.final_mt_simplify(ctx)))
+        ByReifyCap.build(@mapping.map { |bits, inner|
+          {bits, inner.final_mt_simplify(ctx)}
+        })
       end
     end
 
@@ -569,16 +413,6 @@ module Mare::Compiler::Infer
         raise NotImplementedError.new("total_error for Fallback")
       end
 
-      def has_key?(key : Key) : Bool
-        @default.value.has_key?(key) || @options.any?(&.last.has_key?(key))
-      end
-
-      def gather_all_keys(set = Set(Key).new) : Set(Key)
-        @default.value.gather_all_keys(set)
-        @options.each(&.last.gather_all_keys(set))
-        set
-      end
-
       def all_terminal_meta_types : Array(MetaType)
         @default.value.all_terminal_meta_types + @options.flat_map(&.last.all_terminal_meta_types)
       end
@@ -608,21 +442,13 @@ module Mare::Compiler::Infer
         )
       end
 
-      def transform_mt_to_span(decided : Array({Key, MetaType}), &block : MetaType -> Span) : Inner
+      def transform_mt_to_span(&block : MetaType -> Span) : Inner
         Fallback.build(
-          @default.value.transform_mt_to_span(decided, &block),
+          @default.value.transform_mt_to_span(&block),
           @evaluate_mt,
           @options.map { |(cond, inner)|
-            {cond, inner.transform_mt_to_span(decided, &block)}
+            {cond, inner.transform_mt_to_span(&block)}
           }
-        )
-      end
-
-      def simple_decided_by(key : Key, &block : MetaType -> Enumerable({MetaType, MetaType})) : Inner
-        Fallback.build(
-          @default.value.simple_decided_by(key, &block),
-          @evaluate_mt,
-          @options.map { |(cond, inner)| {cond, inner.simple_decided_by(key, &block)} }
         )
       end
 
@@ -653,76 +479,12 @@ module Mare::Compiler::Infer
         end
       end
 
-      def deciding_exact(key : Key, mt : MetaType) : Inner?
-        new_default = @default.value.deciding_exact(key, mt)
-        raise NotImplementedError.new("new_default missing in Fallback.build") \
-          unless new_default
-
-        Fallback.build(
-          new_default,
-          @evaluate_mt,
-          @options.map { |(cond, inner)|
-            new_inner = inner.deciding_exact(key, mt)
-            raise NotImplementedError.new("new_inner missing in Fallback.build") \
-              unless new_inner
-
-            {cond, new_inner}
-          }
-        )
+      def deciding_partial_reify_index(index : Int) : Inner
+        self
       end
 
-      def deciding_f_cap(f_cap_mt : MetaType, is_constructor : Bool) : Inner?
-        new_default = @default.value.deciding_f_cap(f_cap_mt, is_constructor)
-        raise NotImplementedError.new("new_default missing in Fallback.build") \
-          unless new_default
-
-        Fallback.build(
-          new_default,
-          @evaluate_mt,
-          @options.map { |(cond, inner)|
-            new_inner = inner.deciding_f_cap(f_cap_mt, is_constructor)
-            raise NotImplementedError.new("new_inner missing in Fallback.build") \
-              unless new_inner
-
-            {cond, new_inner}
-          }
-        )
-      end
-
-      def deciding_type_param(type_param : TypeParam, cap : MetaType) : Inner?
-        new_default = @default.value.deciding_type_param(type_param, cap)
-        raise NotImplementedError.new("new_default missing in Fallback.build") \
-          unless new_default
-
-        Fallback.build(
-          new_default,
-          @evaluate_mt,
-          @options.map { |(cond, inner)|
-            new_inner = inner.deciding_type_param(type_param, cap)
-            raise NotImplementedError.new("new_inner missing in Fallback.build") \
-              unless new_inner
-
-            {cond, new_inner}
-          }
-        )
-      end
-
-      def narrowing_type_param(type_param : TypeParam, cap : MetaType) : Inner?
-        new_default = @default.value.narrowing_type_param(type_param, cap)
-        raise NotImplementedError.new("new_default missing in Fallback.build") \
-          unless new_default
-
-        Fallback.build(
-          new_default,
-          @evaluate_mt,
-          @options.map { |(cond, inner)|
-            new_inner = inner.narrowing_type_param(type_param, cap)
-            raise NotImplementedError.new("new_inner missing in Fallback.build") \
-              unless new_inner
-
-            {cond, new_inner}
-          }
-        )
+      def narrowing_partial_reify_indices(target_bits : BitArray) : Inner
+        self
       end
 
       def maybe_fallback_based_on_mt_simplify(other_options : Array({Symbol, Inner})) : Inner
@@ -768,14 +530,6 @@ module Mare::Compiler::Infer
         error
       end
 
-      def has_key?(key : Key) : Bool
-        false
-      end
-
-      def gather_all_keys(set = Set(Key).new) : Set(Key)
-        set
-      end
-
       def all_terminal_meta_types : Array(MetaType)
         [] of MetaType
       end
@@ -792,7 +546,7 @@ module Mare::Compiler::Infer
         self
       end
 
-      def transform_mt_to_span(decided : Array({Key, MetaType}), &block : MetaType -> Span) : Inner
+      def transform_mt_to_span(&block : MetaType -> Span) : Inner
         self
       end
 
@@ -800,27 +554,15 @@ module Mare::Compiler::Infer
         self
       end
 
-      def simple_decided_by(key : Key, &block : MetaType -> Enumerable({MetaType, MetaType})) : Inner
-        self
-      end
-
       def combine_mt_to_span(other : Inner, maybe_other_terminal : Terminal?, always_yields_terminal = false, &block : (MetaType, MetaType) -> Span) : Inner
         self
       end
 
-      def deciding_exact(key : Key, mt : MetaType) : Inner?
+      def deciding_partial_reify_index(index : Int) : Inner
         self
       end
 
-      def deciding_f_cap(f_cap_mt : MetaType, is_constructor : Bool) : Inner?
-        self
-      end
-
-      def deciding_type_param(type_param : TypeParam, cap : MetaType) : Inner?
-        self
-      end
-
-      def narrowing_type_param(type_param : TypeParam, cap : MetaType) : Inner?
+      def narrowing_partial_reify_indices(target_bits : BitArray) : Inner
         self
       end
 
