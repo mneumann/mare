@@ -19,7 +19,7 @@
 
     rd.expect_at_end!
 
-:class val RowDescription
+:class val FieldInfo
   :let name String
   :let oid I32
   :let attr_nr I16
@@ -31,13 +31,13 @@
 
 :primitive RowDescriptionDecoder
   :fun decode!(body Bytes'val)
-    :yields (RowDescription) for None
+    :yields (FieldInfo) for None
     rd = _BytesReader.new(body)
 
     num_fields = rd.next_be_u16!.usize
 
     Count.to(num_fields) -> (|
-      yield RowDescription.new(
+      yield FieldInfo.new(
         rd.next_cstring!
         rd.next_be_u32!.i32
         rd.next_be_u16!.i16
