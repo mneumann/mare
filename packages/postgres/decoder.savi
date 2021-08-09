@@ -19,7 +19,7 @@
 
     rd.expect_at_end!
 
-:class val FieldInfo
+:struct FieldInfo
   :let name String
   :let oid I32
   :let attr_nr I16
@@ -27,7 +27,7 @@
   :let typlen I16
   :let atttypmod I32
   :let formatcode I16
-  :new val (@name, @oid, @attr_nr, @type_oid, @typlen, @atttypmod, @formatcode)
+  :new (@name, @oid, @attr_nr, @type_oid, @typlen, @atttypmod, @formatcode)
 
 :module RowDescriptionDecoder
   :fun decode!(body Bytes'val)

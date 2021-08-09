@@ -6,7 +6,7 @@
   :new (env)
     try PostgresConnection.new(env, "127.0.0.1", env.args[1]!, env.args[2]!)
 
-:class val Frame
+:struct Frame
   :let type U8
   :let body Bytes'val
   :new (@type, @body)
