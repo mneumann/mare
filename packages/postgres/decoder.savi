@@ -1,6 +1,6 @@
 :import "collections" (Count)
 
-:primitive DataRowDecoder
+:module DataRowDecoder
   :fun decode!(body Bytes'val)
     :yields (Bytes'iso | None) for None
     rd = _BytesReader.new(body)
@@ -29,7 +29,7 @@
   :let formatcode I16
   :new val (@name, @oid, @attr_nr, @type_oid, @typlen, @atttypmod, @formatcode)
 
-:primitive RowDescriptionDecoder
+:module RowDescriptionDecoder
   :fun decode!(body Bytes'val)
     :yields (FieldInfo) for None
     rd = _BytesReader.new(body)
