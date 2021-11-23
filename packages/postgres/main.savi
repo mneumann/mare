@@ -4,7 +4,10 @@
 
 :actor Main
   :new (env)
-    try PostgresConnection.new(env, "127.0.0.1", env.args[1]!, env.args[2]!)
+    try (
+	conn = PostgresConnection.new(env, "127.0.0.1", env.args[1]!, env.args[2]!)
+	conn.query("SELECT random(), now()")
+    )
 
 :enum ParseFrameState
   :const bit_width U8: 8 
@@ -153,10 +156,28 @@
   :fun ref _handle_parameter_status!()
     @env.err.print(">Parameter Status")
 
-  :fun ref _handle_ready_for_query!()
-      @env.err.print(">ReadyForQuery")
-      @io.write_stream << --MessageEncoder.query_message("select now(), random()")
+  :var _ready_for_query Bool: False
+  :var _pending_queries Array(String): []
+
+  :be query(q String)
+    if @_ready_for_query (	
+      @_send_query(q)
+    |
+      @_pending_queries.push(q)
+    )
+
+  :fun ref _send_query(q String)
+      @io.write_stream << --MessageEncoder.query_message(q)
       @io.flush
+      @_ready_for_query = False
+
+  :fun ref _handle_ready_for_query!()
+      // @env.err.print(">ReadyForQuery")
+      @_ready_for_query = True
+      if @_pending_queries.is_not_empty() ( 
+        next_q = @_pending_queries.pop!() // XXX: Use FIFO
+	@_send_query(next_q)
+      )
 
   :fun ref _handle_empty_query_response!()
       @env.err.print(">EmptyQueryResponse")
