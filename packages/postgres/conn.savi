@@ -1,0 +1,244 @@
+:import "io"
+:import "net"
+:import "os/error"
+
+:class QueryResponse
+  :let rows Array(DataRow)
+  :let desc RowDescription
+  :new iso (@desc, @rows)
+
+:trait tag PostgresNotify
+  :be on_query_response(qr QueryResponse'iso)
+
+:enum _ParseFrameState
+  :const bit_width U8: 8 
+  :member _ExpectFrameHeader: 0
+  :member _ExpectFrameBody: 1
+
+:actor PostgresConnection
+  :is IOActor(IOAction)
+  :let env Env
+  :let io TCPConnectionEngine
+  :let user String
+  :let database String
+
+  :new (@env, host String, @user, @database)
+    @io = TCPConnectionEngine.connect(@, host, "5432")
+
+    if (@io.connect_error != OSErrorNone) (
+      @env.err.print("[PostgresConnection] Failed to connect:")
+      @env.err.print(@io.connect_error.name)
+    )
+  
+  :fun ref _io_react(action IOAction)
+    case action == (
+    | IOActionOpened |
+      @env.err.print("[PostgresConnection] Connected")
+      @io.write_stream << --MessageEncoder.startup_message(@user, @database)
+      @io.flush
+
+    | IOActionOpenFailed |
+      @env.err.print("[PostgresConnection] Failed to connect:")
+      @env.err.print(@io.connect_error.name)
+
+    | IOActionWrite |
+      @io.flush
+
+    | IOActionRead |
+      @io.pending_reads -> (bytes_available |
+        try (
+          @_process_frames!()
+        |
+          @env.err.print("FAILED")
+          @io.close
+        )
+      )
+
+    | IOActionClosed |
+      @env.err.print("[PostgresConnection] Closed")
+      try @io.listen.as!(TCPListener).dispose
+    )
+    @
+
+  :fun ref _report_error!(msg String'val)
+    @env.err.print(msg)
+    error!
+
+  :fun ref _report_warning(msg String'val)
+    @env.err.print(msg)
+
+  // Frame state
+  :var _frame_type U8: 0 
+  :var _frame_size U32: 0
+  :var _frame_body_size U32: 0
+  :var _parse_state _ParseFrameState: _ExpectFrameHeader
+
+  // 
+  :var _ready_for_query Bool: False
+  :var _pending_queries Array(Pair(String, PostgresNotify)): []
+  :var _active_query (None | Pair(String, PostgresNotify)): None
+  :var _row_desc (RowDescription | None): None
+  :var _rows Array(DataRow): []   
+  :var _empty_query Bool: False
+
+  :: Processes as many frames as possible
+  ::
+  :fun ref _process_frames!
+    while True ( 
+      case @_parse_state == (
+      | _ExpectFrameHeader |
+        if (@io.read_stream.bytes_ahead >= 5) (
+          //@io.read_stream.mark_here
+          @io.read_stream.advance!(5)
+          @_frame_type = @io.read_stream.read_byte!(0)
+          @_frame_size = @io.read_stream.read_be_u32!(1)
+          @io.read_stream.mark_here
+          if (@_frame_size < 4) (
+            @_report_error!("Invalid frame size. Expected >= 4.")
+          )
+          @_frame_body_size = @_frame_size - 4
+          @_parse_state = _ExpectFrameBody
+        |
+          return
+        )
+      | _ExpectFrameBody |
+        if (@io.read_stream.bytes_ahead >= @_frame_body_size.usize()) (
+          @io.read_stream.advance!(@_frame_body_size.usize())
+	        try (
+          		@_handle_frame!()
+	        |
+			@_report_error!("Error occured while handling a frame")
+	        )
+          if (@io.read_stream.token_byte_size != 0) (
+            // @_report_warning("Frame wasn't fully consumed")
+            // error!
+          )
+          @io.read_stream.mark_here
+
+          @_parse_state = _ExpectFrameHeader
+        |
+          return
+        )
+      )
+    )
+
+  :fun ref _handle_frame!()
+    case @_frame_type == (
+    | 'E' | @_handle_error_response!()
+    | 'N' | @_handle_notice_response!()
+    | 'G' | @_handle_copyin_response!()
+    | 'H' | @_handle_copyout_response!()
+    | 'P' | @_handle_parse!()
+    | '1' | @_handle_parse_complete!()
+    | 'R' | @_handle_authentification!()
+    | 'S' | @_handle_parameter_status!()
+    | 'Z' | @_handle_ready_for_query!()
+    | 'I' | @_handle_empty_query_response!()
+    | 'D' | @_handle_data_row!()
+    | 'T' | @_handle_row_description!()
+    | 'C' | @_handle_command_complete!()
+    | 'K' | @_handle_backend_keydata!()
+    | 'X' | @_handle_terminate!()
+    |       @_handle_unknown_frame!()
+    )
+
+  :fun ref _handle_error_response!()
+    @env.err.print(">ErrorResponse")
+
+  :fun ref _handle_notice_response!()
+    @env.err.print(">NoticeResponse")
+
+  :fun ref _handle_copyin_response!()
+    @env.err.print(">CopyInResponse")
+
+  :fun ref _handle_copyout_response!()
+    @env.err.print(">CopyOutResponse")
+
+  :fun ref _handle_parse!()
+    @env.err.print(">Parse")
+
+  :fun ref _handle_parse_complete!()
+    @env.err.print(">ParseComplete")
+
+  :fun ref _handle_authentification!()
+    @env.err.print(">Auth")
+
+  :fun ref _handle_parameter_status!()
+    @env.err.print(">Parameter Status")
+
+  :be query(q String, notify PostgresNotify)
+    @_send_query(Pair(String, PostgresNotify).new(q, notify))
+
+  :fun ref _send_query(q Pair(String, PostgresNotify))
+    if @_ready_for_query (
+      if (@_active_query <: None) (
+      |
+        @env.err.print("AAAAAAAAAH")
+      )
+      @_active_query = q
+      @io.write_stream << --MessageEncoder.query_message(q.first)
+      @io.flush
+      @_ready_for_query = False
+    |
+      @_pending_queries.push(q)
+    )
+
+  :fun ref _handle_ready_for_query!()
+      @env.err.print(">ReadyForQuery")
+      @_ready_for_query = True
+
+      if @_pending_queries.is_not_empty() ( 
+        next_q = @_pending_queries.pop!() // XXX: Use FIFO
+        @_send_query(next_q)
+      )
+
+  :fun ref _handle_empty_query_response!()
+    @_empty_query = True
+    @env.err.print(">EmptyQueryResponse")
+
+  :fun ref _handle_data_row!()
+    @env.err.print(">DataRow")
+    @_rows.push(--DataRow.from!(@io.read_stream))
+
+  :fun ref _handle_row_description!()
+    @env.err.print(">RowDescription")
+    @_row_desc = RowDescription.from!(@io.read_stream)
+
+  :fun ref _handle_command_complete!()
+    @env.err.print(">CommandComplete")
+      aq = @_active_query
+      case aq <: (
+      | None |
+        @_report_error!("Command completed without an active query")
+      | Pair(String, PostgresNotify) |
+        // XXX: binding on pattern match? `aq @ ...`
+        row_desc = (@_row_desc <<= None)
+        rows = (@_rows <<= [])
+
+        if (row_desc <: RowDescription) (
+          //if (@_empty_query) 
+          aq.value.on_query_response(QueryResponse.new(--row_desc, --rows))
+        |
+          @_report_error!("No row description given")
+        )
+      )
+
+      @_empty_query = False
+      @_active_query = None
+
+
+
+  :fun ref _handle_backend_keydata!()
+    @env.err.print(">BackendKeyData")
+
+  :fun ref _handle_terminate!()
+    @env.err.print(">Terminate")
+    @io.close
+
+  :fun ref _handle_unknown_frame!()
+    @env.err.print("-------------------------------")
+    @env.err.print("Unknown frame")
+    @env.err.print("-------------------------------")
+    @io.close
+
+

@@ -1,4 +1,5 @@
 :struct Pair(A, B = A)
+
   :let first A
   :let second B
   :new (@first, @second)

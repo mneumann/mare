@@ -2,11 +2,11 @@
 
 :module Null
 
-:class DataRow
+:class iso DataRow
   :let columns Array((Bytes | Null))
 
   // XXX
-  :fun inspect String'iso
+  :fun box inspect String'iso
     output = String.new_iso
     output.push_byte('[')
     @columns.each -> (column |
@@ -56,7 +56,7 @@
 
     FieldInfo.new(name, oid, attr_nr, type_oid, typlen, atttypmod, formatcode)
 
-:class RowDescription
+:class iso RowDescription
   :let fields Array(FieldInfo)
 
   :new iso from!(rd ByteStreamReader'ref)
