@@ -275,3 +275,34 @@
   :fun read_native_u64!(offset USize) U64
     @_data.read_native_u64!(@_mark_offset + offset)
 
+  :: Reads the byte at the current mark position and advances the mark.
+  :fun ref next_byte! U8
+    value = @read_byte!(0)
+    @advance_mark!(1)
+    value
+
+  :fun ref next_be_u16! U16
+    value = @read_be_u16!(0)
+    @advance_mark!(2)
+    value
+
+  :fun ref next_be_u32! U32
+    value = @read_be_u32!(0)
+    @advance_mark!(4)
+    value
+
+  :fun ref next_bytes!(len USize) Bytes'iso
+    value = @read_bytes!(0, len)
+    @advance_mark!(len)
+    --value
+
+  :fun ref next_cstring! String
+      bytes = Bytes.new_iso
+      while True (
+        byte = @next_byte!
+        break if (byte == 0)
+        bytes.push(byte)
+      )
+      String.from_bytes(--bytes)
+
+

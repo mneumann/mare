@@ -6,10 +6,10 @@
   :new (env)
     try PostgresConnection.new(env, "127.0.0.1", env.args[1]!, env.args[2]!)
 
-:struct Frame
-  :let type U8
-  :let body Bytes'val
-  :new (@type, @body)
+:enum ParseFrameState
+  :const bit_width U8: 8 
+  :member ExpectFrameHeader: 0
+  :member ExpectFrameBody: 1
 
 :actor PostgresConnection
   :is IOActor(IOAction)
@@ -43,7 +43,7 @@
     | IOActionRead |
       @io.pending_reads -> (bytes_available |
         try (
-          while @_process_message! ()
+          @_process_frames!()
         |
           @env.err.print("FAILED")
           @io.close
@@ -60,102 +60,131 @@
     @env.err.print(msg)
     error!
 
-  :fun ref _handle_frame!(frame Frame)
-    case frame.type == (
-    | 'E' | @env.err.print(">ErrorResponse")
-    | 'N' | @env.err.print(">NoticeResponse")
-    | 'G' | @env.err.print(">CopyInResponse")
-    | 'H' | @env.err.print(">CopyOutResponse")
-    | 'P' | @env.err.print(">Parse")
-    | '1' | @env.err.print(">ParseComplete")
-    | 'R' | @env.err.print(">Authentification")
-    | 'S' | @env.err.print(">ParameterStatus")
-    | 'Z' |
+  :fun ref _report_warning(msg String'val)
+    @env.err.print(msg)
+
+  :var _frame_type U8: 0 
+  :var _frame_size U32: 0
+  :var _frame_body_size U32: 0
+  :var _parse_state ParseFrameState: ExpectFrameHeader
+
+  :: Processes as many frames as possible
+  ::
+  :fun ref _process_frames!
+    while True ( 
+      case @_parse_state == (
+      | ExpectFrameHeader |
+        if (@io.read_stream.bytes_ahead >= 5) (
+          //@io.read_stream.mark_here
+          @io.read_stream.advance!(5)
+          @_frame_type = @io.read_stream.read_byte!(0)
+          @_frame_size = @io.read_stream.read_be_u32!(1)
+          @io.read_stream.mark_here
+          if (@_frame_size < 4) (
+            @_report_error!("Invalid frame size. Expected >= 4.")
+          )
+          @_frame_body_size = @_frame_size - 4
+          @_parse_state = ExpectFrameBody
+        |
+          return
+        )
+      | ExpectFrameBody |
+        if (@io.read_stream.bytes_ahead >= @_frame_body_size.usize()) (
+          @io.read_stream.advance!(@_frame_body_size.usize())
+	        try (
+          	@_handle_frame!()
+	        |
+		        error!
+	        )
+          if (@io.read_stream.token_byte_size != 0) (
+            @_report_warning("Frame wasn't fully consumed")
+            // error!
+          )
+          @io.read_stream.mark_here
+
+          @_parse_state = ExpectFrameHeader
+        |
+          return
+        )
+      )
+    )
+
+  :fun ref _handle_frame!()
+    case @_frame_type == (
+    | 'E' | @_handle_error_response!()
+    | 'N' | @_handle_notice_response!()
+    | 'G' | @_handle_copyin_response!()
+    | 'H' | @_handle_copyout_response!()
+    | 'P' | @_handle_parse!()
+    | '1' | @_handle_parse_complete!()
+    | 'R' | @_handle_authentification!()
+    | 'S' | @_handle_parameter_status!()
+    | 'Z' | @_handle_ready_for_query!()
+    | 'I' | @_handle_empty_query_response!()
+    | 'D' | @_handle_data_row!()
+    | 'T' | @_handle_row_description!()
+    | 'C' | @_handle_command_complete!()
+    | 'K' | @_handle_backend_keydata!()
+    | 'X' | @_handle_terminate!()
+    |       @_handle_unknown_frame!()
+    )
+
+  :fun ref _handle_error_response!()
+    @env.err.print(">ErrorResponse")
+
+  :fun ref _handle_notice_response!()
+    @env.err.print(">NoticeResponse")
+
+  :fun ref _handle_copyin_response!()
+    @env.err.print(">CopyInResponse")
+
+  :fun ref _handle_copyout_response!()
+    @env.err.print(">CopyOutResponse")
+
+  :fun ref _handle_parse!()
+    @env.err.print(">Parse")
+
+  :fun ref _handle_parse_complete!()
+    @env.err.print(">Parse")
+
+  :fun ref _handle_authentification!()
+    @env.err.print(">Auth")
+
+  :fun ref _handle_parameter_status!()
+    @env.err.print(">Parameter Status")
+
+  :fun ref _handle_ready_for_query!()
       @env.err.print(">ReadyForQuery")
       @io.write_stream << --MessageEncoder.query_message("select now(), random()")
       @io.flush
-    | 'I' |
+
+  :fun ref _handle_empty_query_response!()
       @env.err.print(">EmptyQueryResponse")
-    | 'D' |
-      @env.err.print(">DataRow")
-      try (
-        DataRowDecoder.decode!(frame.body) -> (column |
-          case column <: (
-            | None |
-            @env.err.print("NULL")
-            | Bytes'iso |
-            @env.err.print(Inspect[(--column).as_string])
-          )
-        )
-      |
-        @env.err.print("Failed to decode DataRow")
-      )
 
-    | 'T' |
-      @env.err.print(">RowDescription")
-      RowDescriptionDecoder.decode!(frame.body) -> (row_description |
-        @env.err.print(Inspect[row_description])
-      )
+  :fun ref _handle_data_row!()
+    @env.err.print(">DataRow")
+    data_row = DataRow.from!(@io.read_stream)
+    @env.err.print(data_row.inspect)
 
-    | 'C' | @env.err.print(">CommandComplete")
-    | 'K' | @env.err.print(">BackendKeyData")
-    | 'X' |
-      @env.err.print(">Terminate")
-      @io.close
-    |
-      @env.err.print("-------------------------------")
-      @env.err.print("Unknown message")
-      @env.err.print("-------------------------------")
-      @env.err.print(Inspect[(--frame.body).as_string])
-      @io.close
-    )
+  :fun ref _handle_row_description!()
+    @env.err.print(">RowDescription")
+    row_desc = RowDescription.from!(@io.read_stream)
 
-  :: Processes a message at the current cursor position.
-  ::
-  :: Returns False if it needs more data to process the next message.
-  :fun ref _process_message! Bool
-    frame = @_next_frame!
-    if (frame <: Frame) (
-      @_handle_frame!(frame)
-      True
-    |
-      False
-    )
+  :fun ref _handle_command_complete!()
+    @env.err.print(">CommandComplete")
 
-  :fun ref _next_frame! (Frame | None)
-    // expect cursor and mark position to be the same
-    if (@io.read_stream.token_byte_size > 0) error!
+  :fun ref _handle_backend_keydata!()
+    @env.err.print(">BackendKeyData")
 
-    // XXX: We don't need this
-    // Ensure that cursor and mark position are the same
-    @io.read_stream.mark_here
+  :fun ref _handle_terminate!()
+    @env.err.print(">Terminate")
+    @io.close
 
-    if (@io.read_stream.bytes_ahead < 5) (
-      // Not enough bytes in buffer
-      return None
-    )
+  :fun ref _handle_unknown_frame!()
+    @env.err.print("-------------------------------")
+    @env.err.print("Unknown frame")
+    @env.err.print("-------------------------------")
+    // @env.err.print(Inspect[(--frame.body).as_string])
+    @io.close
 
-    @io.read_stream.advance!(5)
-    message_type = @io.read_stream.read_byte!(0)
-    message_length = @io.read_stream.read_be_u32!(1)
-
-    if (message_length < 4) (
-      @_report_error!("Invalid frame length. Expected >= 4.")
-    )
-
-    body_size = message_length.usize - 4
-
-    if (@io.read_stream.bytes_ahead < body_size) (
-      @env.err.print("Not enough bytes ahead")
-      @io.read_stream.rewind_to_marker
-      return None
-    )
-
-    @io.read_stream.mark_here
-    @io.read_stream.advance!(body_size)
-
-    body = --@io.read_stream.read_bytes!(0, body_size)
-    @io.read_stream.mark_here
-
-    --Frame.new(message_type, --body)
 
