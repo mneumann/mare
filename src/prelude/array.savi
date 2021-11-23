@@ -8,6 +8,17 @@
   :new iso iso_from_cpointer(@_ptr, @_size, @_space) // TODO: remove this and use recover instead?
   :new val val_from_cpointer(@_ptr, @_size, @_space) // TODO: remove this and use recover instead?
 
+  :fun non from_fn(size USize) Array(A)
+    :yields USize for A
+    array = Array(A).new(size)
+    to = size
+    index = 0
+    while (index < to) (
+      array << yield index
+      index += 1
+    )
+    --array
+ 
   :fun ref _ptr_set_null
     @_space = 0
     @_ptr = CPointer(A)._null

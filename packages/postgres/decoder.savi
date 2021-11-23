@@ -1,4 +1,3 @@
-:import "collections" (Count)
 :import "bytes" (ByteStreamReader)
 
 :module Null
@@ -22,17 +21,15 @@
     output.push_byte(']')
     --output
 
-  :new iso from!(reader ByteStreamReader'ref)
-    num_columns = reader.next_be_u16!.usize
-    columns = []
-
-    Count.to(num_columns) -> (|
-      len = reader.next_be_u32!.usize
+  :new iso from!(rd ByteStreamReader'ref)
+    num_columns = rd.next_be_u16!.usize
+    columns = Array((Bytes | Null)).from_fn(num_columns) -> (|
+      len = rd.next_be_u32!.usize
 
       if (len == 0xFFFF_FFFF) (
-        columns.push(Null)
+        Null
       |
-        columns.push(--reader.next_bytes!(len))
+        --rd.next_bytes!(len)
       )
     )
     @columns = --columns
@@ -64,9 +61,8 @@
 
   :new iso from!(rd ByteStreamReader'ref)
     num_fields = rd.next_be_u16!.usize
-    fields = []
-    Count.to(num_fields) -> (|
-      fields << FieldInfo.from!(rd)
+    fields = Array(FieldInfo).from_fn(num_fields) -> (| 
+      FieldInfo.from!(rd)
     )
     @fields = fields
 
